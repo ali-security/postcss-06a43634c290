@@ -1,17 +1,16 @@
-name: Test
+name: Seal Cross-Platform Test
 on:
   push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   full:
-    if: false
     name: Node.js Latest Full
     runs-on: ubuntu-latest
     steps:
+      - name: Configure npm time machine registry
+        run: npm config set registry https://:2023-09-28T22%3A15%3A08.722000Z@time-machines-npm.sealsecurity.io/
       - name: Checkout the repository
         uses: actions/checkout@v4
       - name: Install pnpm
@@ -25,18 +24,36 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Run tests
-        run: pnpm test
+      # The aggregate `pnpm test` fans out to every `test:*` script, which also
+      # pulls in lint/network/native steps that are not meaningful on a fork:
+      #   test:lint     - eslint, style only
+      #   test:size     - size-limit -> esbuild, native/network dependent
+      #   test:coverage - c8 100%-line gate over the same unit suite
+      #   test:integration - downloads CSS from live websites
+      # The deterministic scripts below still run the real unit suite plus the
+      # .d.ts type check and the version check.
+      - name: Run unit tests
+        run: pnpm run unit
+      - name: Check types
+        run: pnpm run test:types
+      - name: Check version
+        run: pnpm run test:version
   short:
-    if: false
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
         node-version:
+          - 20
           - 18
           - 16
-    name: Node.js ${{ matrix.node-version }} Quick
+    name: Node.js ${{ matrix.node-version }} Quick on ${{ matrix.os }}
     steps:
+      - name: Configure npm time machine registry
+        run: npm config set registry https://:2023-09-28T22%3A15%3A08.722000Z@time-machines-npm.sealsecurity.io/
       - name: Checkout the repository
         uses: actions/checkout@v4
       - name: Install pnpm
@@ -53,9 +70,9 @@ jobs:
       - name: Run unit tests
         run: pnpm run unit
   old:
-    if: false
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node-version:
           - 14
@@ -63,6 +80,8 @@ jobs:
           - 10
     name: Node.js ${{ matrix.node-version }} Quick
     steps:
+      - name: Configure npm time machine registry
+        run: npm config set registry https://:2023-09-28T22%3A15%3A08.722000Z@time-machines-npm.sealsecurity.io/
       - name: Checkout the repository
         uses: actions/checkout@v4
       - name: Install pnpm
@@ -81,23 +100,3 @@ jobs:
         run: pnpm install typescript@4
       - name: Run unit tests
         run: pnpm run old
-  windows:
-    if: false
-    runs-on: windows-latest
-    name: Windows Quick
-    steps:
-      - name: Checkout the repository
-        uses: actions/checkout@v4
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: latest
-      - name: Install Node.js LTS
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Run unit tests
-        run: pnpm run unit

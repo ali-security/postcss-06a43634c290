@@ -285,4 +285,74 @@ test('handles document with three roots, with before and after raws', () => {
   is(s, 'a.one {}AFTER_ONEa.two {}AFTER_TWOa.three {}AFTER_THREE')
 })
 
+test('escapes </style & <!-- with \\3c CSS escape', () => {
+  let root = new Root()
+  root.append(new Rule({ selector: '</style>' }))
+  root.append(new AtRule({ name: 'media', params: '<style>' }))
+  root.append({ text: '</style><!--<style>' })
+  let rule = new Rule({ selector: 'a' })
+  rule.raws.before = '\n</style>'
+  rule.raws.after = '</style>'
+  rule.append(new Declaration({ prop: 'color', value: '</style>' }))
+  root.append(rule)
+
+  is(
+    root.toString(),
+    '\\3c /style> {}\n' +
+      '@media \\3c style>;\n' +
+      '/* \\3c /style>\\3c !--\\3c style> */\n' +
+      'a {\n' +
+      '    color: \\3c /style>' +
+      '\\3c /style>}'
+  )
+})
+
+test('does not escape Document raws', () => {
+  let document = new Document()
+  let root1 = new Root()
+  root1.append(new Rule({ selector: 'a' }))
+  let root2 = new Root({ raws: { after: '</style>' } })
+  root2.raws.before = '</style>'
+  root2.append(new Rule({ selector: 'b' }))
+  document.append(root1)
+  document.append(root2)
+
+  is(document.toString(), 'a {}</style>b {}</style>')
+})
+
+test('escapes </style in CSS re-stringified from untrusted input', () => {
+  let payload = '</style><script>alert(1)</script><style>'
+  let vectors = [
+    // The advisory's proof of concept: a declaration value.
+    'body { content: "' + payload + '"; }',
+    // Every other place parsed CSS can carry the payload.
+    payload + '{color:red}',
+    'a { ' + payload + 'x: red }',
+    '@media (' + payload + ') { a { color: red } }',
+    '@import "' + payload + '";',
+    'a{}/* ' + payload + ' */',
+    'a /*' + payload + '*/ { color/*' + payload + '*/: red }',
+    'a { color: red !' + payload + 'important }',
+    '@media screen { a { content: "' + payload + '" } }',
+    // HTML end tags are matched case-insensitively and may be padded.
+    'a { content: "</STYLE>" }',
+    'a { content: "</style   >" }',
+    'a { content: "</style/x>" }',
+    // Comment opener, for `<style>` nested in an escaping text context.
+    'a { content: "<!--" }'
+  ]
+
+  for (let css of vectors) {
+    let out = parse(css).toString()
+    is(/<\/style\b/i.test(out), false, css)
+    is(/<style\b/i.test(out), false, css)
+    is(out.includes('<!--'), false, css)
+  }
+
+  is(
+    parse('body { content: "' + payload + '"; }').toString(),
+    'body { content: "\\3c /style><script>alert(1)</script>\\3c style>"; }'
+  )
+})
+
 test.run()
